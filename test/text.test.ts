@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "bun:test";
-import { renderStoryResponse } from "../src/codex-chat.js";
+import { buildStoryPrompt, renderStoryResponse } from "../src/codex-chat.js";
 import { parsePlayerMessage, splitDiscordMessage, stripBotMention } from "../src/text.js";
 
 test("stripBotMention removes both Discord mention forms", () => {
@@ -60,4 +60,25 @@ test("parsePlayerMessage leaves bold and escaped stars as dialogue", () => {
   assert.deepEqual(parsePlayerMessage("**강조**와 \\*별표\\*"), [
     { type: "dialogue", text: "**강조**와 *별표*" },
   ]);
+});
+
+test("buildStoryPrompt replays retained checkpoints into a rebuilt thread", () => {
+  const prompt = buildStoryPrompt(
+    { sessionKey: "story", requestedBy: "친구", turns: [] },
+    "캐릭터 카드",
+    [
+      {
+        id: "turn-1",
+        inputMessages: [],
+        turns: [],
+        assistantResponse: "**“기억할 대사”**",
+        requestedBy: "친구",
+        createdAt: "now",
+      },
+    ],
+  );
+
+  assert.match(prompt, /BEGIN RETAINED HISTORY JSON/);
+  assert.match(prompt, /기억할 대사/);
+  assert.match(prompt, /add no application-specific content filter/);
 });

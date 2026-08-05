@@ -8,13 +8,14 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 import { mkdir } from "node:fs/promises";
-import { CharacterChat, type StoryTurn } from "./codex-chat.js";
+import { CharacterChat } from "./codex-chat.js";
 import { loadConfig } from "./config.js";
 import { KeyedQueue } from "./queue.js";
 import {
   StateStore,
   type CharacterPreset,
   type PendingMessage,
+  type StoryTurn,
   type UserProfile,
 } from "./state.js";
 import { parsePlayerMessage, splitDiscordMessage, stripBotMention } from "./text.js";
@@ -64,6 +65,16 @@ const commands = [
   new SlashCommandBuilder()
     .setName("reset")
     .setDescription("스토리 기억과 아직 실행하지 않은 입력을 초기화합니다."),
+  new SlashCommandBuilder()
+    .setName("rewind")
+    .setDescription("이전 /run 체크포인트로 돌아가 입력을 다시 대기열에 넣습니다.")
+    .addIntegerOption((option) =>
+      option
+        .setName("steps")
+        .setDescription("되돌릴 /run 턴 수 (기본 1)")
+        .setMinValue(1)
+        .setMaxValue(20),
+    ),
   new SlashCommandBuilder()
     .setName("init")
     .setDescription("이 채널의 캐릭터와 상황을 상세 설정합니다.")
@@ -139,7 +150,7 @@ await client.login(config.discordToken);
 async function registerCommands(): Promise<void> {
   const guild = await client.guilds.fetch(config.guildId);
   await guild.commands.set(commands);
-  console.log("[commands] registered /me /set /run /reset /init /char");
+  console.log("[commands] registered /me /set /run /rewind /reset /init /char");
 }
 
 function shouldQueueMessage(message: Message): boolean {
@@ -197,6 +208,8 @@ async function handleInteraction(interaction: ChatInputCommandInteraction): Prom
     await handleRun(interaction);
   } else if (interaction.commandName === "reset") {
     await handleReset(interaction);
+  } else if (interaction.commandName === "rewind") {
+    await handleRewind(interaction);
   } else if (interaction.commandName === "init") {
     await handleInit(interaction);
   } else if (interaction.commandName === "char") {
@@ -209,12 +222,14 @@ async function handleMe(interaction: ChatInputCommandInteraction): Promise<void>
   const profile = state.getProfile(key);
   const fallbackName = displayName(interaction);
   const pending = state.pendingCount(sessionKey(interaction.guildId!, interaction.channelId));
+  const history = state.historyCount(sessionKey(interaction.guildId!, interaction.channelId));
 
   await interaction.reply({
     content: [
       `**호칭:** ${profile?.nickname || fallbackName}${profile?.nickname ? "" : " (Discord 닉네임)"}`,
       `**특징:** ${profile?.description || "설정 없음"}`,
       `**대기 중인 입력:** ${pending}개`,
+      `**되돌릴 수 있는 턴:** ${history}개`,
       `**모델:** ${config.model} / ${config.reasoningEffort}`,
     ].join("\n"),
     ephemeral: true,
@@ -279,10 +294,35 @@ async function handleRun(interaction: ChatInputCommandInteraction): Promise<void
       await interaction.followUp({ content: chunk, allowedMentions: { parse: [] } });
     }
 
-    await state.consumePending(
-      key,
-      pending.map((message) => message.id),
-    );
+    await state.completeRun(key, {
+      id: interaction.id,
+      inputMessages: pending,
+      turns,
+      assistantResponse: response,
+      requestedBy: displayName(interaction),
+      createdAt: new Date().toISOString(),
+    });
+  });
+}
+
+async function handleRewind(interaction: ChatInputCommandInteraction): Promise<void> {
+  await interaction.deferReply();
+  const key = sessionKey(interaction.guildId!, interaction.channelId);
+  const steps = interaction.options.getInteger("steps") ?? 1;
+  const result = await queue.run(key, () => state.rewindStory(key, steps));
+
+  if (result.rewoundTurns === 0) {
+    await interaction.editReply("되돌릴 `/run` 체크포인트가 없어.");
+    return;
+  }
+
+  await interaction.editReply({
+    content: [
+      `스토리 ${result.rewoundTurns}턴 되돌림.`,
+      `해당 입력 ${result.restoredMessages}개를 \`/run\` 대기열 앞쪽에 복원했어.`,
+      `남은 체크포인트: ${result.remainingTurns}개. 기존 Discord 출력은 보이지만 새 AI 컨텍스트에서는 제외됨.`,
+    ].join("\n"),
+    allowedMentions: { parse: [] },
   });
 }
 
@@ -291,7 +331,7 @@ async function handleReset(interaction: ChatInputCommandInteraction): Promise<vo
   const key = sessionKey(interaction.guildId!, interaction.channelId);
   const result = await queue.run(key, () => state.resetStory(key));
   await interaction.editReply({
-    content: `스토리 초기화됨. 대기 중이던 입력 ${result.discardedMessages}개도 삭제했어. 사용자별 \`/set\` 정보와 캐릭터 \`/init\` 설정은 유지됨.`,
+    content: `스토리 초기화됨. 체크포인트 ${result.discardedTurns}턴과 대기 입력 ${result.discardedMessages}개를 삭제했어. 사용자별 \`/set\` 정보와 캐릭터 \`/init\` 설정은 유지됨.`,
     allowedMentions: { parse: [] },
   });
 }

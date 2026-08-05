@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { PlayerInputBlock } from "./text.js";
 
 export type SessionRecord = {
   threadId: string;
@@ -30,26 +31,46 @@ export type PendingMessage = {
   createdAt: string;
 };
 
+export type StoryTurn = {
+  authorId: string;
+  name: string;
+  description?: string;
+  blocks: PlayerInputBlock[];
+  createdAt: string;
+};
+
+export type StoryCheckpoint = {
+  id: string;
+  inputMessages: PendingMessage[];
+  turns: StoryTurn[];
+  assistantResponse: string;
+  requestedBy: string;
+  createdAt: string;
+};
+
 type StateFile = {
-  version: 3;
+  version: 4;
   sessions: Record<string, SessionRecord>;
   profiles: Record<string, UserProfile>;
   characters: Record<string, CharacterPreset>;
   pending: Record<string, PendingMessage[]>;
+  history: Record<string, StoryCheckpoint[]>;
 };
 
-type LegacyStateFileV2 = Omit<StateFile, "version" | "characters"> & { version: 2 };
+type LegacyStateFileV3 = Omit<StateFile, "version" | "history"> & { version: 3 };
+type LegacyStateFileV2 = Omit<LegacyStateFileV3, "version" | "characters"> & { version: 2 };
 type LegacyStateFileV1 = {
   version: 1;
   sessions: Record<string, SessionRecord>;
 };
 
 const emptyState = (): StateFile => ({
-  version: 3,
+  version: 4,
   sessions: {},
   profiles: {},
   characters: {},
   pending: {},
+  history: {},
 });
 
 export class StateStore {
@@ -68,8 +89,13 @@ export class StateStore {
         this.#state = parsed;
         return;
       }
+      if (isLegacyStateFileV3(parsed)) {
+        this.#state = { ...parsed, version: 4, history: {} };
+        await this.#persist();
+        return;
+      }
       if (isLegacyStateFileV2(parsed)) {
-        this.#state = { ...parsed, version: 3, characters: {} };
+        this.#state = { ...parsed, version: 4, characters: {}, history: {} };
         await this.#persist();
         return;
       }
@@ -144,6 +170,14 @@ export class StateStore {
     return this.#state.pending[sessionKey]?.length ?? 0;
   }
 
+  getHistory(sessionKey: string): StoryCheckpoint[] {
+    return [...(this.#state.history[sessionKey] ?? [])];
+  }
+
+  historyCount(sessionKey: string): number {
+    return this.#state.history[sessionKey]?.length ?? 0;
+  }
+
   async appendPending(
     sessionKey: string,
     message: PendingMessage,
@@ -159,24 +193,73 @@ export class StateStore {
     return messages.length;
   }
 
-  async consumePending(sessionKey: string, messageIds: readonly string[]): Promise<void> {
-    if (messageIds.length === 0) return;
-    const consumed = new Set(messageIds);
+  async completeRun(
+    sessionKey: string,
+    checkpoint: StoryCheckpoint,
+    maximumHistory = 100,
+  ): Promise<void> {
+    const consumed = new Set(checkpoint.inputMessages.map((message) => message.id));
     const current = this.#state.pending[sessionKey] ?? [];
     const remaining = current.filter((message) => !consumed.has(message.id));
-    if (remaining.length === current.length) return;
     if (remaining.length === 0) delete this.#state.pending[sessionKey];
     else this.#state.pending[sessionKey] = remaining;
+
+    const history = this.#state.history[sessionKey] ?? [];
+    history.push(checkpoint);
+    if (history.length > maximumHistory) history.splice(0, history.length - maximumHistory);
+    this.#state.history[sessionKey] = history;
     await this.#persist();
   }
 
-  async resetStory(sessionKey: string): Promise<{ hadSession: boolean; discardedMessages: number }> {
+  async rewindStory(
+    sessionKey: string,
+    requestedSteps: number,
+  ): Promise<{ rewoundTurns: number; restoredMessages: number; remainingTurns: number }> {
+    if (!Number.isSafeInteger(requestedSteps) || requestedSteps <= 0) {
+      throw new Error("Rewind steps must be a positive integer");
+    }
+
+    const history = this.#state.history[sessionKey] ?? [];
+    const rewoundTurns = Math.min(requestedSteps, history.length);
+    if (rewoundTurns === 0) {
+      return { rewoundTurns: 0, restoredMessages: 0, remainingTurns: 0 };
+    }
+
+    const removed = history.splice(history.length - rewoundTurns, rewoundTurns);
+    if (history.length === 0) delete this.#state.history[sessionKey];
+    else this.#state.history[sessionKey] = history;
+
+    const restored = removed.flatMap((checkpoint) => checkpoint.inputMessages);
+    const current = this.#state.pending[sessionKey] ?? [];
+    const seen = new Set<string>();
+    const merged = [...restored, ...current].filter((message) => {
+      if (seen.has(message.id)) return false;
+      seen.add(message.id);
+      return true;
+    });
+    if (merged.length > 0) this.#state.pending[sessionKey] = merged;
+    else delete this.#state.pending[sessionKey];
+
+    delete this.#state.sessions[sessionKey];
+    await this.#persist();
+    return {
+      rewoundTurns,
+      restoredMessages: restored.length,
+      remainingTurns: history.length,
+    };
+  }
+
+  async resetStory(
+    sessionKey: string,
+  ): Promise<{ hadSession: boolean; discardedMessages: number; discardedTurns: number }> {
     const hadSession = sessionKey in this.#state.sessions;
     const discardedMessages = this.#state.pending[sessionKey]?.length ?? 0;
+    const discardedTurns = this.#state.history[sessionKey]?.length ?? 0;
     delete this.#state.sessions[sessionKey];
     delete this.#state.pending[sessionKey];
-    if (hadSession || discardedMessages > 0) await this.#persist();
-    return { hadSession, discardedMessages };
+    delete this.#state.history[sessionKey];
+    if (hadSession || discardedMessages > 0 || discardedTurns > 0) await this.#persist();
+    return { hadSession, discardedMessages, discardedTurns };
   }
 
   async #persist(): Promise<void> {
@@ -196,6 +279,19 @@ export class StateStore {
 function isStateFile(value: unknown): value is StateFile {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<StateFile>;
+  return (
+    candidate.version === 4 &&
+    isRecord(candidate.sessions) &&
+    isRecord(candidate.profiles) &&
+    isRecord(candidate.characters) &&
+    isRecord(candidate.pending) &&
+    isRecord(candidate.history)
+  );
+}
+
+function isLegacyStateFileV3(value: unknown): value is LegacyStateFileV3 {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<LegacyStateFileV3>;
   return (
     candidate.version === 3 &&
     isRecord(candidate.sessions) &&
