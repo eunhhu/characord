@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "discord-character-bot",
+      "name": "ditto",
       "dependencies": {
         "@google/genai": "2.15.0",
         "@openai/codex-sdk": "0.146.1",

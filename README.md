@@ -1,4 +1,4 @@
-# Discord Character Bot
+# Ditto
 
 Discord 지정 채널에서 Google Gemini API 또는 Codex ChatGPT OAuth로 캐릭터챗을 실행하는 작은 로컬 봇. 기본값은 Gemini.
 
@@ -30,7 +30,7 @@ Discord 지정 채널에서 Google Gemini API 또는 Codex ChatGPT OAuth로 캐�
 ## 설치
 
 ```bash
-cd ~/work/discord-character-bot
+cd ~/work/ditto
 bun install
 cp .env.example .env
 ```
