@@ -88,6 +88,38 @@ test("buildStoryPrompt replays retained checkpoints into a rebuilt thread", () =
   assert.match(prompt, /add no application-specific content filter/);
 });
 
+test("buildStoryPrompt forces active progression and separates multiple players", () => {
+  const prompt = buildStoryPrompt(
+    {
+      sessionKey: "story",
+      requestedBy: "진행자",
+      turns: [
+        {
+          authorId: "player-1",
+          name: "하나",
+          blocks: [{ type: "dialogue", text: "문을 열자." }],
+          createdAt: "2026-08-06T10:00:00Z",
+        },
+        {
+          authorId: "player-2",
+          name: "둘",
+          blocks: [{ type: "narration", text: "복도 끝을 살핀다." }],
+          createdAt: "2026-08-06T10:00:01Z",
+        },
+      ],
+    },
+    "캐릭터 카드",
+  );
+
+  assert.match(prompt, /every \/run must materially change story state/);
+  assert.match(prompt, /track each player separately by stable authorId/);
+  assert.match(prompt, /never merge two players/);
+  assert.match(prompt, /location, observable action, available knowledge/);
+  assert.match(prompt, /end with a playable in-world handoff/);
+  assert.match(prompt, /player-1/);
+  assert.match(prompt, /player-2/);
+});
+
 test("Gemini uses structured JSON, medium thinking, and disabled adjustable filters", () => {
   const config = buildGeminiGenerationConfig("medium");
 
