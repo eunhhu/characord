@@ -181,7 +181,7 @@ export function renderStoryResponse(raw: string): string {
 
   return parsed.blocks
     .map((block) => {
-      const text = escapeDiscordMarkdown(stripOuterQuotes(block.text.trim()));
+      const text = escapeDiscordMarkdown(stripOuterFormatting(block.text));
       if (!text) throw new Error("Codex returned an empty story block");
       if (block.type === "narration") return `*${text}*`;
       if (block.type === "dialogue") return `**“${text}”**`;
@@ -209,13 +209,33 @@ function isStoryOutput(value: unknown): value is StoryOutput {
   );
 }
 
-function stripOuterQuotes(text: string): string {
-  const pairs: ReadonlyArray<readonly [string, string]> = [
-    ["“", "”"],
-    ["‘", "’"],
-    ['"', '"'],
-    ["'", "'"],
-  ];
+function stripOuterFormatting(text: string): string {
+  let current = text.trim();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const withoutMarkdown = stripOuterPair(current, [
+      ["***", "***"],
+      ["___", "___"],
+      ["**", "**"],
+      ["__", "__"],
+      ["*", "*"],
+      ["_", "_"],
+    ]);
+    const withoutQuotes = stripOuterPair(withoutMarkdown, [
+      ["“", "”"],
+      ["‘", "’"],
+      ['"', '"'],
+      ["'", "'"],
+    ]);
+    if (withoutQuotes === current) return current;
+    current = withoutQuotes;
+  }
+  return current;
+}
+
+function stripOuterPair(
+  text: string,
+  pairs: ReadonlyArray<readonly [string, string]>,
+): string {
   for (const [start, end] of pairs) {
     if (text.startsWith(start) && text.endsWith(end) && text.length > start.length + end.length) {
       return text.slice(start.length, -end.length).trim();

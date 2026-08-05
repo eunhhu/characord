@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "bun:test";
 import { renderStoryResponse } from "../src/codex-chat.js";
 import { parsePlayerMessage, splitDiscordMessage, stripBotMention } from "../src/text.js";
 
@@ -30,6 +30,21 @@ test("renderStoryResponse applies deterministic Discord Markdown", () => {
   assert.equal(
     renderStoryResponse(raw),
     "*비가 \\*세차게\\* 내린다.*\n\n**“이제 왔네.”**\n\n***‘설마 들킨 건가?’***",
+  );
+});
+
+test("renderStoryResponse removes model-supplied duplicate Markdown wrappers", () => {
+  const raw = JSON.stringify({
+    blocks: [
+      { type: "narration", text: "*문이 열린다.*" },
+      { type: "dialogue", text: "**“들어와.”**" },
+      { type: "thought", text: "***‘늦었네.’***" },
+    ],
+  });
+
+  assert.equal(
+    renderStoryResponse(raw),
+    "*문이 열린다.*\n\n**“들어와.”**\n\n***‘늦었네.’***",
   );
 });
 

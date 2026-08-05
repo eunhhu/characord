@@ -17,7 +17,7 @@ Discord 지정 채널에서 Codex의 ChatGPT 로그인 세션을 이용해 캐�
 
 ## 요구 사항
 
-- Node.js 22 이상
+- Bun 1.3 이상
 - ChatGPT 구독에서 사용 가능한 Codex
 - Discord bot token
 - Discord Developer Portal에서 **Message Content Intent** 활성화
@@ -26,7 +26,7 @@ Discord 지정 채널에서 Codex의 ChatGPT 로그인 세션을 이용해 캐�
 
 ```bash
 cd ~/work/discord-character-bot
-npm install
+bun install
 codex login
 codex login status
 cp .env.example .env
@@ -51,14 +51,13 @@ DISCORD_CHANNEL_ID=...
 개발 실행:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 일반 실행:
 
 ```bash
-npm run build
-npm start
+bun run start
 ```
 
 ## 사용 흐름
@@ -119,9 +118,9 @@ Codex는 본래 코딩 에이전트다. 이 프로젝트는 읽기 전용 sandbo
 ## 검사
 
 ```bash
-npm test
-npm run check
-npm run build
+bun test
+bun run check
+bun run build
 ```
 
 ## 인증 방식
