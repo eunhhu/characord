@@ -21,7 +21,9 @@ import {
 import { parsePlayerMessage, splitDiscordMessage, stripBotMention } from "./text.js";
 
 const config = loadConfig();
-await mkdir(config.codexWorkingDirectory, { recursive: true });
+if (config.aiProvider === "codex") {
+  await mkdir(config.codexWorkingDirectory, { recursive: true });
+}
 
 const state = new StateStore(config.stateFile);
 await state.load();
@@ -115,7 +117,7 @@ const commands = [
 
 client.once("ready", (readyClient) => {
   console.log(
-    `[ready] ${readyClient.user.tag} | guild=${config.guildId} channel=${config.channelId} model=${config.model}/${config.reasoningEffort}`,
+    `[ready] ${readyClient.user.tag} | guild=${config.guildId} channel=${config.channelId} provider=${config.aiProvider} model=${config.model}/${config.reasoningEffort}`,
   );
   void registerCommands().catch((error) => console.error("[commands]", safeError(error)));
 });
@@ -230,7 +232,7 @@ async function handleMe(interaction: ChatInputCommandInteraction): Promise<void>
       `**특징:** ${profile?.description || "설정 없음"}`,
       `**대기 중인 입력:** ${pending}개`,
       `**되돌릴 수 있는 턴:** ${history}개`,
-      `**모델:** ${config.model} / ${config.reasoningEffort}`,
+      `**모델:** ${config.aiProvider} / ${config.model} / ${config.aiProvider === "gemini" ? "thinking" : "reasoning"} ${config.reasoningEffort}`,
     ].join("\n"),
     ephemeral: true,
     allowedMentions: { parse: [] },

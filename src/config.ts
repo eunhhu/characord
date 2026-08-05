@@ -1,45 +1,63 @@
 import path from "node:path";
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type AiProvider = "gemini" | "codex";
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
 
-export type AppConfig = {
+type BaseConfig = {
   discordToken: string;
   guildId: string;
   channelId: string;
   allowedUserIds: ReadonlySet<string>;
   requireMention: boolean;
-  model: string;
-  reasoningEffort: ReasoningEffort;
   responseTimeoutMs: number;
   characterFile: string;
   stateFile: string;
   codexWorkingDirectory: string;
 };
 
-const reasoningEfforts = new Set<ReasoningEffort>([
+export type AppConfig = BaseConfig &
+  (
+    | {
+        aiProvider: "gemini";
+        model: string;
+        reasoningEffort: GeminiThinkingLevel;
+        geminiApiKey: string;
+      }
+    | {
+        aiProvider: "codex";
+        model: string;
+        reasoningEffort: CodexReasoningEffort;
+      }
+  );
+
+const providers = new Set<AiProvider>(["gemini", "codex"]);
+const codexReasoningEfforts = new Set<CodexReasoningEffort>([
   "minimal",
   "low",
   "medium",
   "high",
   "xhigh",
 ]);
+const geminiThinkingLevels = new Set<GeminiThinkingLevel>([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+]);
 
 export function loadConfig(cwd = process.cwd()): AppConfig {
-  const reasoningEffort = (process.env.CODEX_REASONING_EFFORT ?? "low") as ReasoningEffort;
-  if (!reasoningEfforts.has(reasoningEffort)) {
-    throw new Error(
-      "CODEX_REASONING_EFFORT must be one of: minimal, low, medium, high, xhigh",
-    );
+  const aiProvider = (process.env.AI_PROVIDER?.trim().toLowerCase() || "gemini") as AiProvider;
+  if (!providers.has(aiProvider)) {
+    throw new Error("AI_PROVIDER must be one of: gemini, codex");
   }
 
-  return {
+  const base: BaseConfig = {
     discordToken: required("DISCORD_TOKEN"),
     guildId: required("DISCORD_GUILD_ID"),
     channelId: required("DISCORD_CHANNEL_ID"),
     allowedUserIds: new Set(csv(process.env.DISCORD_ALLOWED_USER_IDS)),
     requireMention: booleanValue("DISCORD_REQUIRE_MENTION", false),
-    model: process.env.CODEX_MODEL?.trim() || "gpt-5.6-terra",
-    reasoningEffort,
     responseTimeoutMs: positiveInteger("RESPONSE_TIMEOUT_MS", 180_000),
     characterFile: path.resolve(cwd, process.env.CHARACTER_FILE ?? "character.md"),
     stateFile: path.resolve(cwd, process.env.STATE_FILE ?? "data/state.json"),
@@ -47,6 +65,35 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
       cwd,
       process.env.CODEX_WORKING_DIRECTORY ?? "runtime",
     ),
+  };
+
+  if (aiProvider === "gemini") {
+    const reasoningEffort = (process.env.GEMINI_THINKING_LEVEL ??
+      "medium") as GeminiThinkingLevel;
+    if (!geminiThinkingLevels.has(reasoningEffort)) {
+      throw new Error("GEMINI_THINKING_LEVEL must be one of: minimal, low, medium, high");
+    }
+    return {
+      ...base,
+      aiProvider,
+      model: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+      reasoningEffort,
+      geminiApiKey: required("GEMINI_API_KEY"),
+    };
+  }
+
+  const reasoningEffort = (process.env.CODEX_REASONING_EFFORT ??
+    "medium") as CodexReasoningEffort;
+  if (!codexReasoningEfforts.has(reasoningEffort)) {
+    throw new Error(
+      "CODEX_REASONING_EFFORT must be one of: minimal, low, medium, high, xhigh",
+    );
+  }
+  return {
+    ...base,
+    aiProvider,
+    model: process.env.CODEX_MODEL?.trim() || "gpt-5.6-terra",
+    reasoningEffort,
   };
 }
 

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { HarmBlockThreshold, ThinkingLevel } from "@google/genai";
 import { test } from "bun:test";
-import { buildStoryPrompt, renderStoryResponse } from "../src/codex-chat.js";
+import {
+  buildGeminiGenerationConfig,
+  buildStoryPrompt,
+  renderStoryResponse,
+} from "../src/codex-chat.js";
 import { parsePlayerMessage, splitDiscordMessage, stripBotMention } from "../src/text.js";
 
 test("stripBotMention removes both Discord mention forms", () => {
@@ -81,4 +86,18 @@ test("buildStoryPrompt replays retained checkpoints into a rebuilt thread", () =
   assert.match(prompt, /BEGIN RETAINED HISTORY JSON/);
   assert.match(prompt, /기억할 대사/);
   assert.match(prompt, /add no application-specific content filter/);
+});
+
+test("Gemini uses structured JSON, medium thinking, and disabled adjustable filters", () => {
+  const config = buildGeminiGenerationConfig("medium");
+
+  assert.equal(config.responseMimeType, "application/json");
+  assert.equal(config.thinkingConfig?.thinkingLevel, ThinkingLevel.MEDIUM);
+  assert.ok(config.responseJsonSchema);
+  assert.equal(config.safetySettings?.length, 4);
+  assert.ok(
+    config.safetySettings?.every(
+      (setting) => setting.threshold === HarmBlockThreshold.OFF,
+    ),
+  );
 });
